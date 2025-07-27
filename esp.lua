@@ -23,7 +23,6 @@ Frame.Position = UDim2.new(0.05, 0, 0.2, 0)
 Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 Frame.BorderSizePixel = 0
 Frame.Active = true
-Frame.Draggable = false -- we'll add custom drag
 
 local UICorner = Instance.new("UICorner", Frame)
 UICorner.CornerRadius = UDim.new(0, 12)
@@ -60,23 +59,21 @@ KnobCorner.CornerRadius = UDim.new(1, 0)
 -- Notification GUI (hidden initially)
 local notifFrame = Instance.new("Frame", ScreenGui)
 notifFrame.Size = UDim2.new(0, 250, 0, 50)
-notifFrame.Position = UDim2.new(0.5, -125, 0, -50)
+notifFrame.Position = UDim2.new(0.5, -125, 0, -50) -- start just above screen
 notifFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 notifFrame.BorderSizePixel = 0
 notifFrame.ZIndex = 100
-notifFrame.BackgroundTransparency = 0
-
 local notifCorner = Instance.new("UICorner", notifFrame)
 notifCorner.CornerRadius = UDim.new(0, 8)
 
+-- Shadow Frame for motion blur effect
 local shadowFrame = Instance.new("Frame", notifFrame)
 shadowFrame.Size = UDim2.new(1, 0, 1, 0)
 shadowFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 shadowFrame.BorderSizePixel = 0
-shadowFrame.Position = UDim2.new(0, 5, 0, 0)
+shadowFrame.Position = UDim2.new(0, 5, 0, 0) -- slight offset right
 shadowFrame.BackgroundTransparency = 0.8
 shadowFrame.ZIndex = 95
-
 local shadowCorner = Instance.new("UICorner", shadowFrame)
 shadowCorner.CornerRadius = UDim.new(0, 8)
 
@@ -89,14 +86,16 @@ notifLabel.TextSize = 22
 notifLabel.TextStrokeTransparency = 0.5
 notifLabel.Text = ""
 notifLabel.ZIndex = 110
-notifLabel.TextTransparency = 0
 
+-- Rainbow edge stroke
 local stroke = Instance.new("UIStroke", notifFrame)
 stroke.Thickness = 3
 stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 stroke.Transparency = 0
 
 local hue = 0
+
+-- Notification queue and state
 local notificationQueue = {}
 local notificationRunning = false
 
@@ -113,36 +112,73 @@ local function animateNotification(text)
 	notificationRunning = true
 
 	notifLabel.Text = text
-	notifFrame.Position = UDim2.new(0.5, -125, 0, -50)
-	notifFrame.BackgroundTransparency = 0
-	notifLabel.TextTransparency = 0
 
-	local slideIn = TweenService:Create(notifFrame, TweenInfo.new(0.3), {Position = UDim2.new(0.5, -125, 0, 10)})
-	slideIn:Play()
-	slideIn.Completed:Wait()
+	local hiddenPos = UDim2.new(0.5, -125, 0, -50)
+	local visiblePos = UDim2.new(0.5, -125, 0, 10)
 
-	wait(1) -- Stay visible
+	notifFrame.Position = hiddenPos
+	shadowFrame.Position = UDim2.new(0, 5, 0, 0)
+	shadowFrame.BackgroundTransparency = 0.8
 
-	local fadeOut = TweenService:Create(notifFrame, TweenInfo.new(1), {
-		BackgroundTransparency = 1
-	})
-	local textFade = TweenService:Create(notifLabel, TweenInfo.new(1), {
-		TextTransparency = 1
-	})
+	local slideDuration = 0.3
+	local holdDuration = 2 -- changed to 2 seconds
 
-	fadeOut:Play()
-	textFade:Play()
+	local function slide(fromPos, toPos, duration)
+		local elapsed = 0
+		while elapsed < duration do
+			local dt = RunService.Heartbeat:Wait()
+			elapsed += dt
+			local alpha = math.clamp(elapsed / duration, 0, 1)
 
-	fadeOut.Completed:Wait()
-	notifFrame.Position = UDim2.new(0.5, -125, 0, -50)
+			local interp = function(a, b) return a + (b - a) * alpha end
+			notifFrame.Position = UDim2.new(
+				interp(fromPos.X.Scale, toPos.X.Scale),
+				interp(fromPos.X.Offset, toPos.X.Offset),
+				interp(fromPos.Y.Scale, toPos.Y.Scale),
+				interp(fromPos.Y.Offset, toPos.Y.Offset)
+			)
+
+			local shadowAlpha = math.clamp(alpha - 0.15, 0, 1)
+			shadowFrame.Position = UDim2.new(
+				interp(fromPos.X.Scale, toPos.X.Scale),
+				interp(fromPos.X.Offset + 5, toPos.X.Offset + 5),
+				interp(fromPos.Y.Scale, toPos.Y.Scale),
+				interp(fromPos.Y.Offset, toPos.Y.Offset)
+			)
+
+			if alpha > 0.85 then
+				shadowFrame.BackgroundTransparency = 0.8 + (alpha - 0.85) * 5 * (1 - 0.8)
+			else
+				shadowFrame.BackgroundTransparency = 0.8
+			end
+
+			updateRainbow(dt)
+		end
+
+		notifFrame.Position = toPos
+		shadowFrame.Position = UDim2.new(toPos.X.Scale, toPos.X.Offset + 5, toPos.Y.Scale, toPos.Y.Offset)
+		shadowFrame.BackgroundTransparency = 0.8
+	end
+
+	slide(hiddenPos, visiblePos, slideDuration)
+
+	local holdElapsed = 0
+	while holdElapsed < holdDuration do
+		local dt = RunService.Heartbeat:Wait()
+		holdElapsed += dt
+		updateRainbow(dt)
+	end
+
+	slide(visiblePos, hiddenPos, slideDuration)
 
 	notificationRunning = false
+
 	if #notificationQueue > 0 then
 		task.spawn(animateNotification, table.remove(notificationQueue, 1))
 	end
 end
 
--- 🟩 ESP Core Functions
+-- 📦 ESP Functions
 local function clearESP(model)
 	for _, part in ipairs(model:GetDescendants()) do
 		if part:IsA("BasePart") then
@@ -188,20 +224,14 @@ local function clearAllESP()
 	end
 end
 
--- 🟢 Toggle Handler
+-- Toggle update function
 local function updateSwitch(state)
 	ESPEnabled = state
 	local goalPosition = state and UDim2.new(1, -24, 0, 0) or UDim2.new(0, 0, 0, 0)
 	local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 	TweenService:Create(Knob, tweenInfo, {Position = goalPosition}):Play()
 
-	if state then
-		local neonGreen = Color3.fromRGB(0, 255, 127)
-		local normalGreen = Color3.fromRGB(0, 255, 0)
-		SwitchBG.BackgroundColor3 = neonGreen
-		task.delay(2, function()
-			TweenService:Create(SwitchBG, tweenInfo, {BackgroundColor3 = normalGreen}):Play()
-		end)
+	if ESPEnabled then
 		for _, plr in pairs(Players:GetPlayers()) do
 			if isEnemy(plr.Character) then
 				addESP(plr.Character)
@@ -210,22 +240,21 @@ local function updateSwitch(state)
 		task.spawn(animateNotification, "ESP ON")
 	else
 		clearAllESP()
-		TweenService:Create(SwitchBG, tweenInfo, {BackgroundColor3 = Color3.fromRGB(60,60,60)}):Play()
 		task.spawn(animateNotification, "ESP OFF")
 	end
 end
 
-local toggled = ESPEnabled
+-- Click toggle logic (fixed)
 SwitchBG.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		toggled = not toggled
-		updateSwitch(toggled)
+		updateSwitch(not ESPEnabled)
 	end
 end)
 
+-- Initial ESP state
 updateSwitch(ESPEnabled)
 
--- 🧍 Character & Player Handling
+-- Update ESP for new players or character respawns
 Players.PlayerAdded:Connect(function(plr)
 	plr.CharacterAdded:Connect(function(char)
 		if ESPEnabled and isEnemy(char) then
@@ -234,6 +263,7 @@ Players.PlayerAdded:Connect(function(plr)
 	end)
 end)
 
+-- Also add ESP on existing players' characters if enabled
 for _, plr in pairs(Players:GetPlayers()) do
 	if plr.Character and isEnemy(plr.Character) then
 		if ESPEnabled then addESP(plr.Character) end
@@ -244,27 +274,3 @@ for _, plr in pairs(Players:GetPlayers()) do
 		end
 	end)
 end
-
--- 🖱️ Draggable GUI
-local dragging = false
-local dragStart, startPos
-
-Frame.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		dragging = true
-		dragStart = input.Position
-		startPos = Frame.Position
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
-		local delta = input.Position - dragStart
-		Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-	end
-end)
